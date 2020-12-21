@@ -39,15 +39,17 @@ type OAuthSession struct {
 	ClientID     string
 	ClientSecret string
 	OAuthConfig  *oauth2.Config
-	//TokenExpiry  time.Time
+	TokenExpiry  time.Time
 	UserAgent string
+	Username string
+	Password string
 	ctx       context.Context
 	throttle  *rate.RateLimiter
 }
 
 // NewOAuthSession creates a new session for those who want to log into a
 // reddit account via OAuth.
-func NewOAuthSession(clientID, clientSecret, useragent, redirectURL string) (*OAuthSession, error) {
+func NewOAuthSession(clientID, clientSecret, useragent, redirectURL, username, password string) (*OAuthSession, error) {
 	o := &OAuthSession{}
 
 	if len(useragent) > 0 {
@@ -66,6 +68,10 @@ func NewOAuthSession(clientID, clientSecret, useragent, redirectURL string) (*OA
 		},
 		RedirectURL: redirectURL,
 	}
+
+	o.Username = username
+	o.Password = password
+
 	// Inject our custom HTTP client so that a user-defined UA can
 	// be passed during any authentication requests.
 	c := &http.Client{}
@@ -86,9 +92,9 @@ func (o *OAuthSession) Throttle(interval time.Duration) {
 }
 
 // LoginAuth creates the required HTTP client with a new token.
-func (o *OAuthSession) LoginAuth(username, password string) error {
+func (o *OAuthSession) LoginAuth() error {
 	// Fetch OAuth token.
-	t, err := o.OAuthConfig.PasswordCredentialsToken(o.ctx, username, password)
+	t, err := o.OAuthConfig.PasswordCredentialsToken(o.ctx, o.Username, o.Password)
 	if err != nil {
 		return err
 	}
@@ -102,6 +108,7 @@ func (o *OAuthSession) LoginAuth(username, password string) error {
 		return errors.New(msg)
 	}
 	o.Client = o.OAuthConfig.Client(o.ctx, t)
+	o.TokenExpiry = t.Expiry
 	return nil
 }
 
@@ -118,6 +125,8 @@ func (o *OAuthSession) CodeAuth(code string) error {
 		return err
 	}
 	o.Client = o.OAuthConfig.Client(o.ctx, t)
+	o.TokenExpiry = t.Expiry
+
 	return nil
 }
 
@@ -170,17 +179,29 @@ func (o *OAuthSession) getBody(link string, d interface{}) error {
 		o.throttle.Wait()
 	}
 
+	if time.Until(o.TokenExpiry) < time.Minute*5 {
+		err := o.LoginAuth()
+		if err != nil {
+			return err
+		}
+	}
+
 	resp, err := o.Client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	// body, err := ioutil.ReadAll(resp.Body)
+	// if err != nil {
+	// 	return err
+	// }
+	// if err := json.Unmarshal(body, d); err != nil {
+	// 	return err
+	// }
+
+	err = json.NewDecoder(resp.Body).Decode(d)
 	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, d); err != nil {
 		return err
 	}
 

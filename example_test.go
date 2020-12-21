@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/jzelinskie/geddit"
+	"github.com/chris124567/geddit"
 )
 
 func ExampleNewOAuthSession_login() {
